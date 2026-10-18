@@ -1,0 +1,1 @@
+{ "name": "metron-proto", "version": "0.1.0", "description": "PROTOTYPE (throwaway): live prompt Suggestions while typing, for Metron feasibility", "types": "./types/index.d.ts" }
