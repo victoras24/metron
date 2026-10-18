@@ -1,0 +1,1 @@
+{ "name": "metron", "version": "0.1.0", "description": "Metron: live prompt Suggestions from your Team Playbook", "types": "./types/index.d.ts" }

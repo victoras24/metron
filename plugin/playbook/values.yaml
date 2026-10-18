@@ -1,0 +1,40 @@
+# Thresholds Rules refer to as $name (in conditions) or {name} (in text).
+# evidence: documented = vendor docs state it · guidance = vendor advice, no data · unverified = our guess.
+# Calibrate unverified values from Team data (Suggestion accepted/ignored), then update evidence.
+
+contextTipTokens:
+  value: 150000
+  evidence: unverified
+  note: "Research found no support for a % threshold; use absolute tokens."
+coldCompactMinTokens:
+  value: 50000
+  evidence: unverified
+cacheTtlMs:
+  value: 300000
+  evidence: documented
+  note: "Claude Code prompt cache default is 5 min (1 h for subscription main conversation)."
+largeFeatureWords:
+  value: 40
+  evidence: unverified
+planFirstMinLocations:
+  value: 3
+  evidence: unverified
+smallTaskWords:
+  value: 20
+  evidence: unverified
+correctionTip:
+  value: 2
+  evidence: guidance
+  note: "Anthropic: if you've corrected more than twice, /clear and start fresh."
+correctionCheck:
+  value: 3
+  evidence: unverified
+
+# Engine timing, not Rules.
+tipPauseMs:
+  value: 600
+  evidence: unverified
+  note: "Typing pause before Tips show, so half-written drafts don't flicker."
+tipMinWords:
+  value: 5
+  evidence: unverified
