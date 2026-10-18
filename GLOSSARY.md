@@ -44,6 +44,10 @@ _Avoid_: Auto-rule
 The versioned set of Rules a Team owns.
 _Avoid_: Ruleset, config
 
+**Signal**:
+A named fact about a draft Prompt or its Session (e.g. `bug`, `errorText`, `contextTokens`) that Rule conditions combine. Detected in code; which Signals matter is the Playbook's call.
+_Avoid_: Feature, detector
+
 **Suggestion**:
 Advice shown to a Member about their draft Prompt or Session. Comes from a Rule or from AI analysis. May recommend doing something or *not* doing something. Is Accepted or Ignored.
 _Avoid_: Hint, tip, recommendation

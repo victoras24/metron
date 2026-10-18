@@ -12,52 +12,60 @@ Where to look:
 - **Ghost** = dim text after your cursor, starting with `⟵`
 
 How it behaves:
-- Tips appear ~0.6 s after you **stop typing**, only for drafts of 5+ words.
+- Tips appear ~0.6 s after you **stop typing**, only for drafts of 5+ words (slash commands exempt).
 - Ghost text appears on the **next keystroke after the pause** (e.g. type a space), cursor at end only.
-- Checks (Large feature, Context > 60%) never show while typing; they fire on Enter.
+- Checks (plan first, bug without evidence, 3rd correction) never show while typing; they fire on Enter.
+- Rules and thresholds come from [prompting-best-practices.md](../research/prompting-best-practices.md). Numbers marked "unverified" in `PLAYBOOK` are guesses to calibrate.
 
 ## A. Tips while typing
 
 | # | Do | Expect | Pass? | Notes |
 |---|----|--------|-------|-------|
 | 1 | Look at strip with empty box | Only debug line | | |
-| 2 | Type `the login page crashes with an exception`, stop | After ~0.6 s: 💡 **Bug report** + `Use /mattpocock-skills:diagnosing-bugs` | | |
-| 3 | From 2, type a space | Ghost `⟵ Bug report…` appears | | |
-| 4 | Type `grill me then fix typo in readme.md`, stop | 💡 **Small task: skip the grilling session** | | |
-| 5 | Type `make the dashboard page load faster for all the users please`, stop | 💡 **Add file paths and what "done" looks like** | | |
+| 2 | Type ``the login page crashes when I run `npm start` ``, stop | After ~0.6 s: 💡 **Ask for a failing test** + `Use /mattpocock-skills:diagnosing-bugs` | | |
+| 3 | From 2, type a space | Ghost `⟵ Ask for a failing test…` appears | | |
+| 4 | Type `grill me then fix typo in readme.md`, stop | 💡 **Clear, small change: skip planning/interview** | | |
+| 5 | Type `make the dashboard page load faster for all the users please`, stop | 💡 **Say what "done" looks like** and 💡 **Point to the file or symbol** | | |
 | 6 | Type `make src/dashboard/page.tsx load faster, it should render under 1s`, stop | No 💡 (has path + "should") | | |
-| 7 | Type `implement a new billing feature`, stop | No 💡 (Large feature is a check → waits for Enter) | | |
-| 8 | Type `fix the crash`, stop | No 💡 (under 5 words) | | |
-| 9 | Type `/compact`, stop | No 💡 (slash commands ignored) | | |
+| 7 | Type `how does the billing module handle refunds for users`, stop | No 💡 (question, not a change) | | |
+| 8 | Type `investigate why the app feels slow lately`, stop | 💡 **Scope it… or have a subagent investigate** | | |
+| 9 | Type `implement a new billing feature`, stop | No 💡 (plan first is a check → waits for Enter) | | |
+| 10 | Type `fix the crash`, stop | No 💡 (under 5 words) | | |
+| 11 | Type `/compact`, stop (fresh session) | No 💡 | | |
 
 ## B. Pause behaviour
 
 | # | Do | Expect | Pass? | Notes |
 |---|----|--------|-------|-------|
-| 10 | Type case 2 text **continuously** without stopping | No 💡 while typing; appears only once you stop | | |
-| 11 | From 10, keep typing more words | 💡 stays stable, no flicker per key | | |
-| 12 | From 2, delete `exception` and `crashes` with Backspace, stop | 💡 disappears after the pause | | |
-| 13 | From 3, move cursor left with ← | Ghost disappears; strip stays | | |
-| 14 | Paste a long paragraph | Debug `bursts` +1, `keys` unchanged | | |
-| 15 | Type fast for ~10 s, then stop | No typing lag; debug `max` eval < 50 ms | | max = ___ ms |
+| 12 | Type case 2 text **continuously** without stopping | No 💡 while typing; appears only once you stop | | |
+| 13 | From 12, keep typing more words | 💡 stays stable, no flicker per key | | |
+| 14 | From 2, delete `crashes` with Backspace, stop | 💡 changes/disappears after the pause | | |
+| 15 | From 3, move cursor left with ← | Ghost disappears; strip stays | | |
+| 16 | Paste a long paragraph | Debug `bursts` +1, `keys` unchanged | | |
+| 17 | Type fast for ~10 s, then stop | No typing lag; debug `max` eval < 50 ms | | max = ___ ms |
 
 ## C. Checks on Enter
 
 | # | Do | Expect | Pass? | Notes |
 |---|----|--------|-------|-------|
-| 16 | Type `implement a new billing feature`, press **Enter** | NOT sent. Text stays in box, notice "Metron check: Large feature…", strip shows ⛔ **Held** + `Use /grilling`; debug `held` +1 | | |
-| 17 | From 16, click `Use /grilling`, then change text to `/grilling plan a new billing feature`… **don't send**; instead clear box | `/grilling ` inserted; debug `used` +1 | | |
-| 18 | Type `build a tiny feature: reply with the word ok only`, press **Enter** | Held (⛔) | | |
-| 19 | From 18, press **Enter** again (same text) | Sent to Claude (replies "ok"); debug `overridden` +1; ⛔ gone | | |
-| 20 | Type `build a tiny feature: reply ok`, Enter (held), then edit to `plan first, then build a tiny feature: reply ok`, Enter | Second Enter sends (mentions plan); debug `fixed` +1 | | |
-| 21 | Type `say hi in one word`, Enter | Sent immediately (no check); strip clears while Claude works | | |
+| 18 | Type `implement a new billing feature`, press **Enter** | NOT sent. Notice "Metron check: Multi-file or unclear approach: plan first…", ⛔ **Held** + `Use /grilling`; debug `held` +1 | | |
+| 19 | Type `build a tiny feature: reply with the word ok only`, press **Enter** | Held (⛔) | | |
+| 20 | From 19, press **Enter** again (same text) | Sent (replies "ok"); debug `overridden` +1; ⛔ gone | | |
+| 21 | Type `build a tiny feature: reply ok`, Enter (held), edit to `plan first, then build a tiny feature: reply ok`, Enter | Sends; debug `fixed` +1 | | |
+| 22 | Type `the login page crashes`, Enter | Held: ⛔ **Bug with no error text or repro** | | |
+| 23 | Type `login crashes with "TypeError: user is undefined", reply ok only`, Enter | Sent (has error text) | | |
+| 24 | Type `say hi in one word`, Enter | Sent immediately; strip clears while Claude works | | |
 
-## D. Optional
+## D. Session rules
 
 | # | Do | Expect | Pass? | Notes |
 |---|----|--------|-------|-------|
-| 22 | In a session with context > 60% (check `/context`), type anything, Enter | Held: ⛔ **Context is over 60% full** + `Use /compact` | | |
-| 23 | Click `Hide debug` (empty box) | Strip disappears | | |
+| 25 | Send `that still does not work, reply ok`; then type `no, it still does not work at all`, stop | 💡 **2nd correction… /clear**; debug `corrections 1` | | |
+| 26 | Send 25's text, then type `still not working`, Enter | Held: ⛔ **Correction loop** | | |
+| 27 | After any reply, type `/model`, stop | 💡 **Switching model/effort/fast mid-Session rebuilds the prompt cache** | | |
+| 28 | Session with > 50k context, idle > 5 min, type `/compact`, stop | 💡 **Cache likely expired** | | |
+| 29 | Session with > 150k context (debug `ctx`), type any 5+ word draft, stop | 💡 **Context over 150k tokens** + `Use /compact` (tip only, never held) | | |
+| 30 | Click `Hide debug` (empty box) | Strip disappears | | |
 
 ## Verdict
 
