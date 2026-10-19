@@ -5,7 +5,8 @@ Live Suggestions from the Team Playbook: Tips while typing (after a pause), Chec
 Run: `claude --plugin-dir plugin`
 Tests: `claude plugin test plugin` (wiring) and `node --test plugin/tests/playbook.spec.ts` (Rules vs. real Playbook files)
 Validate a Playbook: `node plugin/scripts/check-playbook.ts [dir]` (exit 1 on errors; use in the Playbook repo's CI)
-Typecheck: copy `.claude-plugin/types` from a dev mod (gitignored), then `tsc -p plugin`
+Calibration report: `node plugin/scripts/calibration-report.ts [dir]` (per-Rule outcomes from `~/.metron/calibration`, see below)
+Typecheck: copy `.claude-plugin/types` from a dev mod (gitignored), then `tsc -b plugin` (checks `tsconfig.hooks.json` with sandbox types and `tsconfig.node.json` for scripts/specs with Node types; needs `pnpm i` at the repo root)
 
 ## Playbook
 
@@ -37,3 +38,7 @@ Why this Rule exists, with sources. For reviewers; not shown at runtime.
 
 Conditions: `signal`, `not signal`, `numberSignal <op> 3 | $value` (`> >= < <= == !=`), `text ~ /regex/flags`.
 Signals are defined in `hooks/signals.ts`; unknown names, values or fields fail validation.
+
+## Calibration log
+
+Each Suggestion outcome (accepted · fixed · ignored · overridden) is appended to `~/.metron/calibration/<session>.jsonl` with the Rule id and the sent Prompt's number Signals. No Prompt text (ADR 0012). Use the report to move `unverified` values toward what Members act on.

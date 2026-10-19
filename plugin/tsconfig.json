@@ -1,5 +1,5 @@
 {
-  "extends": "./.claude-plugin/types/tsconfig.json",
-  "compilerOptions": { "allowImportingTsExtensions": true },
-  "include": ["hooks", "types", "tests/*.test.ts"]
+	// Two projects with different globals: `tsc -b plugin` checks both.
+	"files": [],
+	"references": [{ "path": "./tsconfig.hooks.json" }, { "path": "./tsconfig.node.json" }]
 }

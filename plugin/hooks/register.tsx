@@ -4,6 +4,7 @@ import { atom, read, update } from 'claude-code'
 import type { CoreEngineInterface, Register } from 'claude-code'
 
 import type { Stats } from '../types'
+import { addShown, resolveHeld, resolveTips, signalSnapshot, toJsonl, type CalibrationEvent, type Resolved, type Shown } from './calibration.ts'
 import { buildPlaybook, evaluate, valueOf, type Playbook, type PlaybookFile, type Suggestion } from './playbook.ts'
 import { isCorrection, words, type Ctx } from './signals.ts'
 
@@ -11,7 +12,7 @@ const suggestionsAtom = atom({ plugin: 'metron', key: 'suggestions' } as const, 
 const heldAtom = atom({ plugin: 'metron', key: 'held' } as const, [] as Suggestion[])
 const statsAtom = atom({ plugin: 'metron', key: 'stats' } as const, {
   edits: 0, keyEdits: 0, bursts: 0, lastEvalMs: 0, maxEvalMs: 0,
-  shown: 0, accepted: 0, held: 0, overridden: 0, fixedAfterHold: 0,
+  shown: 0, accepted: 0, held: 0, overridden: 0, fixedAfterHold: 0, tipsFixed: 0, tipsIgnored: 0, logged: 0,
 } as Stats)
 const debugAtom = atom({ plugin: 'metron', key: 'isDebug' } as const, true)
 
@@ -19,6 +20,19 @@ const debugAtom = atom({ plugin: 'metron', key: 'isDebug' } as const, true)
 export const TEAM_PLAYBOOK_DIR = '.metron/playbook'
 
 type Loaded = Playbook & { source: string }
+
+// Calibration log: one JSONL file per Session under ~/.metron, rewritten whole (fs has no append; files stay small).
+// Local only; a Collector ships it later (ADR 0012).
+const writeCalibration = async ($: Pick<CoreEngineInterface, 'fs' | 'env'>, session: string, events: CalibrationEvent[]) => {
+  const home = await $.env.get('HOME')
+  if (!home || !session) return false
+  try {
+    await $.fs.write(`${home}/.metron/calibration/${session}.jsonl`, toJsonl(events))
+    return true
+  } catch {
+    return false // never block a Prompt over logging
+  }
+}
 
 const loadPlaybook = async ($: Pick<CoreEngineInterface, 'fs' | 'plugin'>): Promise<Loaded> => {
   let dir = TEAM_PLAYBOOK_DIR
@@ -36,6 +50,25 @@ const loadPlaybook = async ($: Pick<CoreEngineInterface, 'fs' | 'plugin'>): Prom
   }
 }
 
+type CalibrationLog = { session: string; events: CalibrationEvent[] }
+
+const logOutcomes = async (
+  $: Pick<CoreEngineInterface, 'fs' | 'env' | 'session' | 'state' | 'clock'>,
+  log: CalibrationLog, book: Loaded, ctx: Ctx,
+  outcomes: Resolved[],
+) => {
+  if (outcomes.length === 0) return
+  log.session ||= await $.session.id()
+  const ts = await $.clock.now()
+  const playbook = book.source === TEAM_PLAYBOOK_DIR ? 'team' : 'bundled'
+  const signals = signalSnapshot(ctx)
+  for (const o of outcomes) log.events.push({ ts, session: log.session, playbook, ...o, signals })
+  if (await writeCalibration($, log.session, log.events)) {
+    const n = log.events.length
+    await update($, statsAtom, s => ({ ...s, logged: n }))
+  }
+}
+
 export const register: Register = on => {
   let pb: Loaded | undefined
   let contextTokens = 0
@@ -45,6 +78,10 @@ export const register: Register = on => {
   let settledIds: string[] = []
   let pause: { cancel: () => void } | undefined
   let heldText: string | undefined
+  let held: Shown[] = []
+  let shownTips: Shown[] = [] // every Tip shown since the last send
+  let acceptedIds: string[] = []
+  let log: CalibrationLog = { session: '', events: [] }
 
   // Idle time only matters once a turn has completed, so skip the clock read before that.
   const ctxFor = (text: string, now: number): Ctx => ({
@@ -58,7 +95,11 @@ export const register: Register = on => {
     turns = 0
     lastTurnAt = undefined
     heldText = undefined
+    held = []
     settledIds = []
+    shownTips = []
+    acceptedIds = []
+    log = { session: '', events: [] }
   }
 
   on('session.start', async ($, e, next) => {
@@ -110,6 +151,7 @@ export const register: Register = on => {
         const ids = tips.map(t => t.ruleId)
         const fresh = ids.filter(id => !settledIds.includes(id)).length
         settledIds = ids
+        shownTips = addShown(shownTips, ids, signalSnapshot(ctx))
         await update($, suggestionsAtom, () => tips)
         await update($, statsAtom, s => ({
           ...s, lastEvalMs: evalMs, maxEvalMs: Math.max(s.maxEvalMs, evalMs), shown: s.shown + fresh,
@@ -139,13 +181,20 @@ export const register: Register = on => {
     settledIds = []
     await update($, suggestionsAtom, () => [])
 
-    const isComposer = e.origin.kind === 'composer'
-    const checks = isComposer ? evaluate(book, ctxFor(e.text, lastTurnAt === undefined ? 0 : await $.clock.now()), 'check') : []
+    // Only the Member's own typed Prompts are checked and calibrated; other sends leave a hold pending.
+    if (e.origin.kind !== 'composer') return next(e)
+
+    const ctx = ctxFor(e.text, lastTurnAt === undefined ? 0 : await $.clock.now())
+    const checks = evaluate(book, ctx, 'check')
     const wasHeld = heldText !== undefined
+    const outcomes = heldText !== undefined ? resolveHeld(book, held, heldText, ctx) : []
 
     // Same text sent again after a hold → Member overrides; let it through.
     if (checks.length > 0 && heldText !== e.text) {
       heldText = e.text
+      // A Check held again keeps the Signals from its first hold.
+      held = addShown(held.filter(h => checks.some(c => c.ruleId === h.ruleId)), checks.map(c => c.ruleId), signalSnapshot(ctx))
+      await logOutcomes($, log, book, ctx, outcomes)
       await update($, heldAtom, () => checks)
       await update($, statsAtom, s => ({ ...s, held: s.held + 1 }))
       return { drop: `Metron check: ${checks.map(c => c.text).join(' · ')} — press Enter again to send anyway` }
@@ -157,10 +206,21 @@ export const register: Register = on => {
       fixedAfterHold: s.fixedAfterHold + (wasHeld && heldText !== e.text ? 1 : 0),
     }))
     heldText = undefined
+    held = []
     await update($, heldAtom, () => [])
 
+    const tips = resolveTips(book, shownTips, acceptedIds, ctx)
+    shownTips = []
+    acceptedIds = []
+    await logOutcomes($, log, book, ctx, [...outcomes, ...tips])
+    await update($, statsAtom, s => ({
+      ...s,
+      tipsFixed: s.tipsFixed + tips.filter(t => t.outcome === 'fixed').length,
+      tipsIgnored: s.tipsIgnored + tips.filter(t => t.outcome === 'ignored').length,
+    }))
+
     // Count consecutive correction Prompts; anything else (incl. /clear) resets.
-    if (isComposer) priorCorrections = isCorrection(e.text) && !e.text.startsWith('/') ? priorCorrections + 1 : 0
+    priorCorrections = isCorrection(e.text) && !e.text.startsWith('/') ? priorCorrections + 1 : 0
     return next(e)
   })
 
@@ -193,6 +253,7 @@ export const register: Register = on => {
                 label={`Use ${sg.insert.trim()}`}
                 onPress={async () => {
                   await $.prompt.fill({ text: sg.insert!, mode: 'insert' })
+                  if (!acceptedIds.includes(sg.ruleId)) acceptedIds = [...acceptedIds, sg.ruleId]
                   await update($, statsAtom, x => ({ ...x, accepted: x.accepted + 1 }))
                 }}
               />
@@ -202,7 +263,7 @@ export const register: Register = on => {
         {isDebug ? (
           <Box>
             <Text dimColor>
-              [metron] playbook {book.source} ({book.rules.length} rules) · edits {s.edits} · eval {s.lastEvalMs.toFixed(2)}ms (max {s.maxEvalMs.toFixed(2)}) · ctx {Math.round(contextTokens / 1000)}k · turns {turns} · corrections {priorCorrections} · tips shown {s.shown} · used {s.accepted} · held {s.held} / overridden {s.overridden} / fixed {s.fixedAfterHold}{' '}
+              [metron] playbook {book.source} ({book.rules.length} rules) · edits {s.edits} · eval {s.lastEvalMs.toFixed(2)}ms (max {s.maxEvalMs.toFixed(2)}) · ctx {Math.round(contextTokens / 1000)}k · turns {turns} · corrections {priorCorrections} · tips shown {s.shown} · used {s.accepted} · held {s.held} / overridden {s.overridden} / fixed {s.fixedAfterHold} · tips fixed {s.tipsFixed} / ignored {s.tipsIgnored} · logged {s.logged}{' '}
             </Text>
             <Button key="dbg" label="Hide debug" onPress={() => update($, debugAtom, () => false)} />
           </Box>

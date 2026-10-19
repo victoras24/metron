@@ -53,7 +53,7 @@ Advice shown to a Member about their draft Prompt or Session. Comes from a Rule 
 _Avoid_: Hint, tip, recommendation
 
 **Tip**:
-A Suggestion shown while the Member types, after a typing pause. Never blocks.
+A Suggestion shown while the Member types, after a typing pause. Never blocks. Changing the Prompt so the Tip no longer applies counts as Fixed; sending with it still applying counts as Ignored.
 _Avoid_: Hint, nudge
 
 **Check**:
