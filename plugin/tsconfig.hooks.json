@@ -1,0 +1,12 @@
+{
+	// Hook code: runs in the Claude Code plugin sandbox, so only its types (no Node).
+	"extends": "./.claude-plugin/types/tsconfig.json",
+	"compilerOptions": {
+		"allowImportingTsExtensions": true,
+		"noEmit": false,
+		"composite": true,
+		"emitDeclarationOnly": true,
+		"outDir": "../node_modules/.cache/tsc-plugin-hooks"
+	},
+	"include": ["hooks", "types", "tests/*.test.ts"]
+}

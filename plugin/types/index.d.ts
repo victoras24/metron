@@ -11,6 +11,9 @@ export type Stats = {
   held: number
   overridden: number
   fixedAfterHold: number
+  tipsFixed: number
+  tipsIgnored: number
+  logged: number
 }
 
 declare module 'claude-code' {

@@ -43,14 +43,14 @@ describe('bundled Playbook', () => {
     assert.deepEqual(ids('still not working', 'check', { priorCorrections: 2 }), ['correction-loop-check']))
 
   test('context size tip uses values.yaml threshold', () => {
-    const big = { contextTokens: pb.values.contextTipTokens.value }
+    const big = { contextTokens: pb.values.contextTipTokens!.value }
     const [s] = evaluate(pb, ctx('say hi in one word please', big), 'tip')
-    assert.equal(s.ruleId, 'context-size')
-    assert.match(s.text, /150k/)
+    assert.equal(s?.ruleId, 'context-size')
+    assert.match(s?.text ?? '', /150k/)
     assert.deepEqual(ids('say hi in one word please', 'tip', { contextTokens: big.contextTokens - 1 }), [])
   })
   test('cold /compact after cache expiry', () => {
-    const cold = { idleMs: pb.values.cacheTtlMs.value + 1, contextTokens: 60_000 }
+    const cold = { idleMs: pb.values.cacheTtlMs!.value + 1, contextTokens: 60_000 }
     assert.deepEqual(ids('/compact', 'tip', cold), ['cold-compact'])
     assert.deepEqual(ids('/compact', 'tip', { ...cold, idleMs: 1000 }), [])
   })

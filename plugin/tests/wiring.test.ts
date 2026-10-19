@@ -124,3 +124,106 @@ test('subagent turns do not count', async ($, on) => {
   await $.turn.complete(turnDone('agent-1'))
   expect(((await $.prompt.submit(submit('hello there'))) as any).drop).toBeUndefined()
 })
+
+// Calibration log: captured fs.write calls, keyed by path.
+let WRITES: Record<string, string> = {}
+const logged = () => Object.values(WRITES).flatMap(t => t.trim().split('\n')).map(l => JSON.parse(l))
+const mockLog = (on: any, withClock = true) => {
+  WRITES = {}
+  mock.env(on, { HOME: '/home/m' })
+  if (withClock) mock.clock(on)
+  on('session.id', () => ({ value: 's1' }))
+  on('fs.write', (_$: unknown, e: any) => {
+    WRITES[e.path] = e.text
+    return { value: undefined }
+  })
+}
+
+test('held Check sent unchanged logs overridden, without Prompt text', async ($, on) => {
+  mockFs(on, bundled({ '10-no-yolo.md': CHECK }))
+  mockLog(on)
+  passthrough(on)
+  await $.prompt.submit(submit('ship it yolo'))
+  await $.prompt.submit(submit('ship it yolo'))
+  expect(Object.keys(WRITES)).toEqual(['/home/m/.metron/calibration/s1.jsonl'])
+  const [ev] = logged()
+  expect(ev).toMatchObject({ ruleId: 'no-yolo', severity: 'check', outcome: 'overridden', playbook: 'bundled', session: 's1' })
+  expect(ev.signals.words).toBe(3)
+  expect(JSON.stringify(WRITES)).not.toContain('yolo"')
+})
+
+test('held Check fixed by editing logs fixed', async ($, on) => {
+  mockFs(on, bundled({ '10-no-yolo.md': CHECK }))
+  mockLog(on)
+  passthrough(on)
+  await $.prompt.submit(submit('ship it yolo'))
+  await $.prompt.submit(submit('ship it carefully'))
+  expect(logged().map(e => e.outcome)).toEqual(['fixed'])
+})
+
+test('shown Tip: still matching at send → ignored, edited away → fixed', async ($: any, on) => {
+  mockFs(on, bundled({ '10-say-why.md': TIP }))
+  passthrough(on)
+  const clock = mock.clock(on)
+  mockLog(on, false)
+  on('prompt.edit', splice)
+  await $.prompt.edit(typeAll('fix it please'))
+  await clock.advance(700)
+  await $.prompt.submit(submit('fix it please'))
+  await $.prompt.edit(typeAll('fix it please'))
+  await clock.advance(700)
+  await $.prompt.submit(submit('fix it because tests fail'))
+  const evs = logged()
+  expect(evs.map(e => `${e.ruleId}:${e.outcome}`)).toEqual(['say-why:ignored', 'say-why:fixed'])
+  // The fixed Tip logs the draft that triggered it (3 words), not the sent Prompt (5 words).
+  expect([evs[1].shownSignals.words, evs[1].signals.words]).toEqual([3, 5])
+})
+
+test('a non-composer send (e.g. task notification) leaves a held Check pending', async ($, on) => {
+  mockFs(on, bundled({ '10-no-yolo.md': CHECK }))
+  mockLog(on)
+  passthrough(on)
+  await $.prompt.submit(submit('ship it yolo'))
+  await $.prompt.submit({ text: 'task finished', origin: { kind: 'task-notification' }, wait: false } as any)
+  expect(logged()).toEqual([])
+  const again: any = await $.prompt.submit(submit('ship it yolo'))
+  expect(again.text).toBe('ship it yolo')
+  expect(logged().map(e => e.outcome)).toEqual(['overridden'])
+})
+
+test('Windows: logs under USERPROFILE when HOME is unset', async ($, on) => {
+  mockFs(on, bundled({ '10-no-yolo.md': CHECK }))
+  WRITES = {}
+  mock.env(on, { USERPROFILE: '/Users/m' })
+  mock.clock(on)
+  on('session.id', () => ({ value: 's1' }))
+  on('fs.write', (_$: unknown, e: any) => {
+    WRITES[e.path] = e.text
+    return { value: undefined }
+  })
+  passthrough(on)
+  await $.prompt.submit(submit('ship it yolo'))
+  await $.prompt.submit(submit('ship it yolo'))
+  expect(Object.keys(WRITES)).toEqual(['/Users/m/.metron/calibration/s1.jsonl'])
+})
+
+test('a failing session id does not stop a Check from holding', async ($, on) => {
+  mockFs(on, bundled({ '10-no-yolo.md': CHECK }))
+  mock.env(on, { HOME: '/home/m' })
+  mock.clock(on)
+  on('session.id', () => ({ deny: 'no session' }))
+  passthrough(on)
+  await $.prompt.submit(submit('ship it yolo'))
+  expect(((await $.prompt.submit(submit('ship it carefully yolo'))) as any).drop).toContain('No yolo')
+})
+
+test('a task notification keeps the draft\'s Tip', async ($: any, on) => {
+  mockFs(on, bundled({ '10-say-why.md': TIP }))
+  passthrough(on)
+  const clock = mock.clock(on)
+  on('prompt.edit', splice)
+  await $.prompt.edit(typeAll('fix it please'))
+  await clock.advance(700)
+  await $.prompt.submit({ text: 'task finished', origin: { kind: 'task-notification' }, wait: false } as any)
+  expect(ghost(await $.prompt.edit(nudge('fix it please')))).toContain('Say why')
+})
