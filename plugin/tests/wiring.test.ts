@@ -100,3 +100,27 @@ test('consecutive corrections count; a normal Prompt resets', async ($, on) => {
   expect(((await $.prompt.submit(submit('still broken'))) as any).drop).toContain('Loop')
 })
 
+
+const TURNS = '---\nid: needs-turn\nseverity: check\nwhen:\n  all:\n    - turns > 0\ntext: "Mid-Session"\n---\n'
+const turnDone = (agentId?: string) => ({ reason: 'answer', text: '', ...(agentId ? { agentId } : {}) }) as any
+
+test('/clear (session.end) resets turns', async ($, on) => {
+  mockFs(on, bundled({ '10-needs-turn.md': TURNS }))
+  passthrough(on)
+  on('session.usage', () => ({ value: { context: { tokens: 0 } } }))
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', () => ({ sessionId: 'x' }))
+  await $.turn.complete(turnDone())
+  expect(((await $.prompt.submit(submit('hello there'))) as any).drop).toContain('Mid-Session')
+  await $.session.end({ reason: 'clear' } as any)
+  expect(((await $.prompt.submit(submit('hello again'))) as any).drop).toBeUndefined()
+})
+
+test('subagent turns do not count', async ($, on) => {
+  mockFs(on, bundled({ '10-needs-turn.md': TURNS }))
+  passthrough(on)
+  on('session.usage', () => ({ value: { context: { tokens: 0 } } }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.turn.complete(turnDone('agent-1'))
+  expect(((await $.prompt.submit(submit('hello there'))) as any).drop).toBeUndefined()
+})
