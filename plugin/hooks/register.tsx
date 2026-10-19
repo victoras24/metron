@@ -52,17 +52,34 @@ export const register: Register = on => {
     idleMs: lastTurnAt === undefined ? 0 : now - lastTurnAt,
   })
 
-  // New Session (incl. /clear) re-reads the Playbook, so edits apply without restarting.
-  on('session.start', async ($, e, next) => {
-    pb = await loadPlaybook($)
-    contextTokens = (await $.session.usage()).context.tokens ?? 0
+  const resetSession = () => {
+    contextTokens = 0
     priorCorrections = 0
     turns = 0
     lastTurnAt = undefined
+    heldText = undefined
+    settledIds = []
+  }
+
+  on('session.start', async ($, e, next) => {
+    resetSession()
+    pb = await loadPlaybook($)
+    contextTokens = (await $.session.usage()).context.tokens ?? 0
+    return next(e)
+  })
+
+  // session.start never fires on /clear; session.end does. Drop the Playbook so the next use re-reads it.
+  on('session.end', async ($, e, next) => {
+    pause?.cancel()
+    resetSession()
+    pb = undefined
+    await update($, suggestionsAtom, () => [])
+    await update($, heldAtom, () => [])
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
+    if (e.agentId !== undefined) return next(e) // subagent turns aren't the Member's turns
     contextTokens = (await $.session.usage()).context.tokens ?? 0
     turns += 1
     lastTurnAt = await $.clock.now()
