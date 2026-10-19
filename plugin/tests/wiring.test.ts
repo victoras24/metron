@@ -190,3 +190,40 @@ test('a non-composer send (e.g. task notification) leaves a held Check pending',
   expect(again.text).toBe('ship it yolo')
   expect(logged().map(e => e.outcome)).toEqual(['overridden'])
 })
+
+test('Windows: logs under USERPROFILE when HOME is unset', async ($, on) => {
+  mockFs(on, bundled({ '10-no-yolo.md': CHECK }))
+  WRITES = {}
+  mock.env(on, { USERPROFILE: '/Users/m' })
+  mock.clock(on)
+  on('session.id', () => ({ value: 's1' }))
+  on('fs.write', (_$: unknown, e: any) => {
+    WRITES[e.path] = e.text
+    return { value: undefined }
+  })
+  passthrough(on)
+  await $.prompt.submit(submit('ship it yolo'))
+  await $.prompt.submit(submit('ship it yolo'))
+  expect(Object.keys(WRITES)).toEqual(['/Users/m/.metron/calibration/s1.jsonl'])
+})
+
+test('a failing session id does not stop a Check from holding', async ($, on) => {
+  mockFs(on, bundled({ '10-no-yolo.md': CHECK }))
+  mock.env(on, { HOME: '/home/m' })
+  mock.clock(on)
+  on('session.id', () => ({ deny: 'no session' }))
+  passthrough(on)
+  await $.prompt.submit(submit('ship it yolo'))
+  expect(((await $.prompt.submit(submit('ship it carefully yolo'))) as any).drop).toContain('No yolo')
+})
+
+test('a task notification keeps the draft\'s Tip', async ($: any, on) => {
+  mockFs(on, bundled({ '10-say-why.md': TIP }))
+  passthrough(on)
+  const clock = mock.clock(on)
+  on('prompt.edit', splice)
+  await $.prompt.edit(typeAll('fix it please'))
+  await clock.advance(700)
+  await $.prompt.submit({ text: 'task finished', origin: { kind: 'task-notification' }, wait: false } as any)
+  expect(ghost(await $.prompt.edit(nudge('fix it please')))).toContain('Say why')
+})

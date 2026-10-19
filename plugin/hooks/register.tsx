@@ -24,14 +24,10 @@ type Loaded = Playbook & { source: string }
 // Calibration log: one JSONL file per Session under ~/.metron, rewritten whole (fs has no append; files stay small).
 // Local only; a Collector ships it later (ADR 0012).
 const writeCalibration = async ($: Pick<CoreEngineInterface, 'fs' | 'env'>, session: string, events: CalibrationEvent[]) => {
-  const home = await $.env.get('HOME')
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE')) // USERPROFILE: Windows
   if (!home || !session) return false
-  try {
-    await $.fs.write(`${home}/.metron/calibration/${session}.jsonl`, toJsonl(events))
-    return true
-  } catch {
-    return false // never block a Prompt over logging
-  }
+  await $.fs.write(`${home}/.metron/calibration/${session}.jsonl`, toJsonl(events))
+  return true
 }
 
 const loadPlaybook = async ($: Pick<CoreEngineInterface, 'fs' | 'plugin'>): Promise<Loaded> => {
@@ -58,14 +54,19 @@ const logOutcomes = async (
   outcomes: Resolved[],
 ) => {
   if (outcomes.length === 0) return
-  log.session ||= await $.session.id()
-  const ts = await $.clock.now()
-  const playbook = book.source === TEAM_PLAYBOOK_DIR ? 'team' : 'bundled'
-  const signals = signalSnapshot(ctx)
-  for (const o of outcomes) log.events.push({ ts, session: log.session, playbook, ...o, signals })
-  if (await writeCalibration($, log.session, log.events)) {
-    const n = log.events.length
-    await update($, statsAtom, s => ({ ...s, logged: n }))
+  // Never let logging break a hold or a send: any failure here is swallowed.
+  try {
+    log.session ||= await $.session.id()
+    const ts = await $.clock.now()
+    const playbook = book.source === TEAM_PLAYBOOK_DIR ? 'team' : 'bundled'
+    const signals = signalSnapshot(ctx)
+    for (const o of outcomes) log.events.push({ ts, session: log.session, playbook, ...o, signals })
+    if (await writeCalibration($, log.session, log.events)) {
+      const n = log.events.length
+      await update($, statsAtom, s => ({ ...s, logged: n }))
+    }
+  } catch {
+    // dropped; the Member's Prompt matters more than one log line
   }
 }
 
@@ -176,13 +177,14 @@ export const register: Register = on => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    // Only the Member's own typed Prompts are checked and calibrated; other sends (task notifications,
+    // scheduled prompts) leave the draft's Tips and any hold untouched.
+    if (e.origin.kind !== 'composer') return next(e)
+
     const book = (pb ??= await loadPlaybook($))
     pause?.cancel()
     settledIds = []
     await update($, suggestionsAtom, () => [])
-
-    // Only the Member's own typed Prompts are checked and calibrated; other sends leave a hold pending.
-    if (e.origin.kind !== 'composer') return next(e)
 
     const ctx = ctxFor(e.text, lastTurnAt === undefined ? 0 : await $.clock.now())
     const checks = evaluate(book, ctx, 'check')
